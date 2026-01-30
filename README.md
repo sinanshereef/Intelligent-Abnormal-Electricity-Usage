@@ -15,5 +15,8 @@ This project detects abnormal residential electricity consumption using Machine 
 - Streamlit
 - Plotly
 
+## Live App
+🔗 https://intelligent-abnormal-electricity-usage-4p5oy39xjhetfoxxoj4vtr.streamlit.app/
+
 ## How to Run
 streamlit run app.py
