@@ -2,6 +2,7 @@ import streamlit as st
 import numpy as np
 import joblib
 import plotly.graph_objects as go
+import shap
 
 st.set_page_config(
     page_title="⚡ Intelligent Abnormal Electricity Usage Detection",
@@ -27,6 +28,12 @@ def load_artifacts():
     return model, scaler
 
 model, scaler = load_artifacts()
+
+@st.cache_resource
+def load_explainer(_model):
+    return shap.TreeExplainer(_model)
+
+explainer = load_explainer(model)
 
 
 st.markdown(
@@ -151,39 +158,89 @@ if predict_btn:
     for r in reasons:
         st.markdown(f"<p class='center'>• {r}</p>",unsafe_allow_html=True)
 
-    
-    st.divider()
-    st.markdown("<h2 class='center'>⭐ Model Feature Importance</h2>", unsafe_allow_html=True)
+    # ==============================
+    # 🎯 User-Specific Impact (SHAP)
+    # ==============================
 
-    feature_names = [
-        "Region_Code",
-        "Dwelling_Type",
-        "Num_Occupants",
-        "House_Area (sqft)",
-        "Appliance_Score",
-        "Connected_Load(kw)",
-        "Temperature_C",
-        "Humidity (%)",
-        "Deviation_Abs",
-        "Usage_Ratio",
-        "Load_Utilization"
+    st.divider()
+    st.markdown("<h2 class='center'>🎯 What Influenced Your Result</h2>", unsafe_allow_html=True)
+    st.markdown(
+        """
+        <p style='text-align: center; font-size: 14px; color: gray;'>
+        These factors show which inputs most influenced the prediction.
+        Higher percentage means stronger influence.
+        </p>
+        """,
+        unsafe_allow_html=True
+    )
+
+
+    shap_values = explainer.shap_values(input_scaled)
+
+    # ===== Robust handling for RandomForest (all SHAP versions) =====
+    if isinstance(shap_values, list):
+    # Old style → list per class
+        user_shap = shap_values[1][0]
+
+    elif len(shap_values.shape) == 3:
+    # New style → (samples, features, classes)
+        user_shap = shap_values[0, :, 1]
+
+    else:
+    # Fallback
+        user_shap = shap_values[0]
+
+    # Friendly feature names (MATCH USER UI)
+    friendly_names = [
+        "📍 Region",
+        "🏢 Dwelling Type",
+        "👨‍👩‍👧 Number of Occupants",
+        "🏠 House Area (sqft)",
+        "🔌 Appliance Score",
+        "⚡ Connected Load (kW)",
+        "🌡 Temperature (°C)",
+        "💧 Humidity (%)",
+        "📉 Usage Deviation (kWh)",
+        "📊 Usage Ratio",
+        "⚙️ Load Utilization"
     ]
 
-    fig = go.Figure(
+    # Convert to percentage impact
+    impact = user_shap.flatten()
+
+    # ⭐ THEN normalize
+    abs_impact = np.abs(impact)
+
+    total = abs_impact.sum()
+    if total == 0:
+        impact_percent = abs_impact
+    else:
+        impact_percent = (abs_impact / total) * 100
+      
+    # Show top 6 most important for this user
+    top_n = 6
+    sorted_idx = np.argsort(impact_percent)[-top_n:]
+    
+    # Color bars by direction
+
+    fig_shap = go.Figure(
         go.Bar(
-            x=model.feature_importances_,
-            y=feature_names,
-            orientation="h"
+            x=impact_percent[sorted_idx],
+            y=np.array(friendly_names)[sorted_idx],
+            orientation="h",
+            text=[f"{v:.1f}%" for v in impact_percent[sorted_idx]],
+            textposition="outside"
         )
     )
 
-    fig.update_layout(
-        height=320,
+    fig_shap.update_layout(
+        height=380,
         yaxis=dict(autorange="reversed"),
-        margin=dict(l=130, r=30, t=30, b=30)
+        margin=dict(l=160, r=40, t=30, b=30),
+        xaxis_title="Impact on Prediction (%)"
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig_shap, use_container_width=True)
 
     
     st.divider()
